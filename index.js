@@ -18,12 +18,12 @@ var T = new Twit({
   access_token_secret: ACCESS_TOKEN_SECRET
 });
 
-var stream = T.stream('statuses/filter', { track: '@ziptemp' });
-stream.on('tweet', function(tweet) {
-  var zipcode = tweet.text.split(" ").filter(text => /(^\d{5}$)|(^\d{5}-\d{4}$)/.test(text))[0];
+var handlers = {
+  error: function(tweet, payload) {
 
-  if (zipcode) {
-    lookupTempInZipCode(zipcode, (err, response, body) => {
+  },
+  lookup: function(tweet, payload) {
+    lookupTempInZipCode(payload, (err, response, body) => {
       if (err) {
         return console.error("error:", err);
       }
@@ -44,12 +44,59 @@ stream.on('tweet', function(tweet) {
       var reply = "@" + name + " It's currently " + degrees + "°F " + flavor + " in " + city + ".";
       T.post('statuses/update', {in_reply_to_status_id: source_tweet, status: reply}, function(err, data, response) {
         if (err) { console.error(err); }
-        else {console.log("[" + zipcode + "] - [" + reply + "]")};
+        else {console.log("[" + payload + "] - [" + reply + "]")};
       });
     });
+  },
+  subscribe: function(tweet, payload) {
+    var name = tweet.user.screen_name;
+    console.log("[subscribe] " + name + " subscribed to " + payload);
+  },
+  unsubscribe: function(tweet, payload) {
+    var name = tweet.user.screen_name;
+    console.log("[unsubscribe] " + name + " unsubscribed from " + payload);
   }
+}
+
+var stream = T.stream('statuses/filter', { track: '@ziptemp' });
+stream.on('tweet', function(tweet) {
+  // returns {type: ..., payload: ...}
+  var commands = parseCommand(tweet.text);
+
+  commands.forEach(function(command) {
+    var handler = handlers[command.type];
+    handler(tweet, command.payload);
+  });
 });
 
 function lookupTempInZipCode(zipCode, callback) {
   request("http://api.openweathermap.org/data/2.5/weather?zip=" + zipCode + ",us&units=imperial&appid=" + WEATHER_KEY, callback);
+}
+
+function parseCommand(text) {
+  var tokens = text.split(" ").reduce(function(acc, value) {
+    if (/(^\d{5}$)|(^\d{5}-\d{4}$)/.test(value)) { acc.zipcodes.push(value); }
+    if (value === "subscribe") { acc.subscribe = true; }
+    if (value === "unsubscribe") { acc.unsubscribe = true; }
+
+    return acc;
+  }, {zipcodes: [], subscribe: false, unsubscribe: false});
+
+  if (tokens.subscribe && tokens.unsubscribe) {
+    return [{type: "error", payload: "can't both subscribe and unsubscribe at once." }];
+  }
+
+  if (tokens.subscribe) {
+    return tokens.zipcodes.map(function(zipcode) {
+      return {type: "subscribe", payload: zipcode};
+    })
+  } else if (tokens.unsubscribe) {
+    return tokens.zipcodes.map(function(zipcode) {
+      return {type: "unsubscribe", payload: zipcode};
+    })
+  } else {
+    return tokens.zipcodes.map(function(zipcode) {
+      return {type: "lookup", payload: zipcode};
+    })
+  }
 }
