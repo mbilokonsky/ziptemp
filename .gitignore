@@ -1,5 +1,6 @@
 node_modules
 npm-debug.log
+database.db
 
 # Elastic Beanstalk Files
 .elasticbeanstalk/*

@@ -1,14 +1,16 @@
 var request = require('request');
 var Twit = require("twit");
+var store = require("./store");
+var scheduler = require("./scheduler");
+var weather_service = require("./weather_service");
 
-var WEATHER_KEY = process.env.WEATHER_KEY;
 var CONSUMER_KEY = process.env.ZIPTEMP_CONSUMER_KEY;
 var CONSUMER_SECRET = process.env.ZIPTEMP_CONSUMER_SECRET;
 var ACCESS_TOKEN = process.env.ZIPTEMP_ACCESS_TOKEN;
 var ACCESS_TOKEN_SECRET = process.env.ZIPTEMP_ACCESS_TOKEN_SECRET;
 
 if (!CONSUMER_KEY || ! CONSUMER_SECRET || !ACCESS_TOKEN || !ACCESS_TOKEN_SECRET) {
-  console.error("You failed to provide the expected environment configuration variables.")
+  console.error("You failed to provide the expected environment configuration variables.");
 }
 
 var T = new Twit({
@@ -18,43 +20,55 @@ var T = new Twit({
   access_token_secret: ACCESS_TOKEN_SECRET
 });
 
+function publish(text, in_reply_to) {
+  T.post('statuses/update', {in_reply_to_status_id: in_reply_to, status: text}, function(err, data, response) {
+    if (err) { console.error(err); }
+  });
+}
+
+function lookupAndSendWeatherData(username, zipcode, source_tweet) {
+  weather_service.lookupTempInZipCode(zipcode, function(err, formattedResponse) {
+    var reply = "@" + username + " " + formattedResponse;
+    publish(reply, source_tweet);
+  });
+}
+
 var handlers = {
   error: function(tweet, payload) {
 
   },
-  lookup: function(tweet, payload) {
-    lookupTempInZipCode(payload, (err, response, body) => {
+  lookup: function(tweet, zipcode) {
+    var source_tweet = tweet.id_str;
+    var name = tweet.user.screen_name;
+    lookupAndSendWeatherData(name, zipcode, source_tweet);
+  },
+  subscribe: function(tweet, zipcode) {
+    var source_tweet = tweet.id_str;
+    var name = tweet.user.screen_name;
+    store.addSubscription(name, zipcode, source_tweet, function(err, result) {
       if (err) {
-        return console.error("error:", err);
+        var reply = "@" + name + " Subscription failed. Try again, maybe? Just say 'subscribe [zipcode]'";
+        publish(reply, source_tweet);
+        console.warn("[subscribe failed]", tweet.text, err);
+      } else {
+        var reply = "@" + name + " subscribed to  " + zipcode + ". Tweet 'unsubscribe " + zipcode + "' at me to unsubscribe.";
+        publish(reply, source_tweet);
+        console.log("[subscribe] " + name + " subscribed to " + zipcode);
       }
-
-      body = JSON.parse(body);
-      var source_tweet = tweet.id_str;
-      var name = tweet.user.screen_name;
-
-      var degrees = body.main.temp;
-      var high = body.main.temp_max;
-      var low = body.main.temp_min;
-      var flavor = "";
-      if (body.weather && body.weather.length > 0) {
-        flavor = "with " + body.weather[0].description;
-      }
-      var city = body.name;
-
-      var reply = "@" + name + " It's currently " + degrees + "°F " + flavor + " in " + city + ".";
-      T.post('statuses/update', {in_reply_to_status_id: source_tweet, status: reply}, function(err, data, response) {
-        if (err) { console.error(err); }
-        else {console.log("[" + payload + "] - [" + reply + "]")};
-      });
     });
   },
-  subscribe: function(tweet, payload) {
+  unsubscribe: function(tweet, zipcode) {
+    var source_tweet = tweet.id_str;
     var name = tweet.user.screen_name;
-    console.log("[subscribe] " + name + " subscribed to " + payload);
-  },
-  unsubscribe: function(tweet, payload) {
-    var name = tweet.user.screen_name;
-    console.log("[unsubscribe] " + name + " unsubscribed from " + payload);
+    var reply = "";
+    store.removeSubscription(name, zipcode, function(err, result) {
+      if (err) {
+        reply = "@" + name + "Unsubscribe failed. Notifying @mykola to fix it. Stand by.";
+      } else {
+        reply = "@" + name + " you have unsubsribed from daily updates for " + zipcode + ".";
+      }
+      publish(reply, source_tweet);
+    });
   }
 }
 
@@ -68,10 +82,6 @@ stream.on('tweet', function(tweet) {
     handler(tweet, command.payload);
   });
 });
-
-function lookupTempInZipCode(zipCode, callback) {
-  request("http://api.openweathermap.org/data/2.5/weather?zip=" + zipCode + ",us&units=imperial&appid=" + WEATHER_KEY, callback);
-}
 
 function parseCommand(text) {
   var tokens = text.split(" ").reduce(function(acc, value) {
@@ -100,3 +110,12 @@ function parseCommand(text) {
     })
   }
 }
+
+scheduler.initialize(function(users_by_zip) {
+  console.log("\t", "Now publishing tweets!");
+  Object.keys(users_by_zip).forEach(function(zipcode) {
+    users_by_zip[zipcode].forEach(function(record) {
+      lookupAndSendWeatherData(record.name, zipcode, record.subscription_tweet_id);
+    });
+  });
+})

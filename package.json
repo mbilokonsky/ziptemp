@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "lint": "eslint **/*.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -15,8 +16,13 @@
   "author": "@mykola",
   "license": "ISC",
   "dependencies": {
+    "cron": "^1.1.0",
+    "nedb": "^1.8.0",
     "request": "^2.69.0",
-    "twit": "^2.2.2"
+    "twit": "^2.2.2",
+    "zipcode-to-timezone": "0.0.6"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "eslint": "^2.10.2"
+  }
 }
