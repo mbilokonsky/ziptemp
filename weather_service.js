@@ -4,10 +4,12 @@ module.exports = {
   lookupTempInZipCode: function(zipcode, callback) {
     request("http://api.openweathermap.org/data/2.5/weather?zip=" + zipcode + ",us&units=imperial&appid=" + WEATHER_KEY, function(err, response, body) {
       if (err) {
-        callback(err);
+        return callback(err);
       }
 
       body = JSON.parse(body);
+      console.dir(body);
+
 
       var degrees = body.main.temp;
       var high = body.main.temp_max;
@@ -18,7 +20,7 @@ module.exports = {
       }
       var city = body.name;
 
-      callback(null, "It's currently " + degrees + "°F " + flavor + " in " + city + ".")
+      callback(null, "It's currently " + degrees + "°F (high: " + high + "°F, low: " + low + "°F) " + flavor + " in the " + zipcode + " area.")
     });
   }
 }
